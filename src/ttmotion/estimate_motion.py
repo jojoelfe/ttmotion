@@ -2,7 +2,7 @@ import einops
 import numpy as np
 import torch
 from torch_cubic_spline_grids import CubicBSplineGrid3d
-from torch_shapes import circle
+#from torch_shapes import circle
 from torch_fourier_shift import fourier_shift_dft_2d
 
 from .patch_grid import patch_grid
@@ -52,17 +52,18 @@ def estimate_motion(
     )
 
     # mask data patches with a soft, circular mask
-    mask = circle(radius=ph / 4, image_shape=(ph, pw), smoothing_radius=ph / 8)
-    patches = patches * mask
+    #mask = circle(radius=ph / 4, image_shape=(ph, pw), smoothing_radius=ph / 8)
+    #patches = patches * mask
 
     # calculate rfft2 of data, enables fast shift in fourier space
     patches = torch.fft.rfftn(patches, dim=(-2, -1))
 
     for i in range(n_iterations):
         # work on a subset of patches in each iteration
-        idx_h, idx_w = np.random.randint(
-            low=(0, 0), high=(gh, gw), size=(2, n_patches_per_batch)
+        patch_idx = np.random.randint(
+            low=(0, 0), high=(gh, gw), size=(n_patches_per_batch, 2)
         )
+        idx_h, idx_w = einops.rearrange(patch_idx, 'b idx -> idx b')
         patch_subset = patches[:, idx_h, idx_w]
         patch_subset_positions = patch_positions[:, idx_h, idx_w]
 
@@ -74,10 +75,10 @@ def estimate_motion(
             shifts=predicted_shifts,
             rfft=True,
             fftshifted=False,
-        )  # (t, b, ph, pw)
+        ).real  # (t, b, ph, pw)
 
         # calculate reference as sum of shifted patches
-        references = einops.reduce(shifted_data_patches, 't b ph pw -> b ph pw', reduction='sum')
+        references = einops.reduce(shifted_data_patches, 't b ph pw -> b ph pw', reduction='mean')
 
         # calculate loss
         diff = torch.abs(references - shifted_data_patches) ** 2
@@ -91,4 +92,4 @@ def estimate_motion(
         if i % 20 == 0:
             print(loss.item())
             print(deformation_field.data)
-        return deformation_field.data.cpu().detach().numpy()
+    return deformation_field.data.cpu().detach().numpy()
